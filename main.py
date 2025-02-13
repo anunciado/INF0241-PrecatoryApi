@@ -11,6 +11,16 @@ app = FastAPI()
 API_URL = "https://api.bcb.gov.br/dados/serie/bcdata.sgs.4390/dados?formato=json"
 
 
+from fastapi import FastAPI, Response
+from fastapi.responses import FileResponse
+import requests
+import pandas as pd
+import os
+
+app = FastAPI()
+
+API_URL = "https://api.bcb.gov.br/dados/serie/bcdata.sgs.4390/dados?formato=json"
+
 @app.get("/gerar-xls")
 async def gerar_xls():
     try:
@@ -28,20 +38,31 @@ async def gerar_xls():
         # Converte a coluna "Data" para o formato datetime
         df["Data"] = pd.to_datetime(df["Data"], format="%d/%m/%Y")
 
-        # Extrai o ano e o mês das datas
-        df["Ano"] = df["Data"].dt.year
-        df["Mês"] = df["Data"].dt.month_name()
-
         # Converte a coluna "Valor" para float
         df["Valor"] = pd.to_numeric(df["Valor"], errors="coerce")
+
+        # Ordena os dados da mais recente para a mais antiga
+        df = df.sort_values(by="Data", ascending=False).reset_index(drop=True)
+
+        # Substitui o primeiro valor por 1
+        if not df.empty:
+            df.at[0, "Valor"] = 1
+
+        # Itera sobre os demais dados e ajusta os valores para o valor acumulado
+        for i in range(1, len(df)):
+            df.at[i, "Valor"] = df.at[i - 1, "Valor"] + df.at[i, "Valor"] * 0.01
+
+        # Extrai o ano e o mês das datas
+        df["Ano"] = df["Data"].dt.year
+        df["Mês"] = df["Data"].dt.month_name(locale='pt_BR')
 
         # Cria uma tabela dinâmica com os anos como linhas e os meses como colunas
         df_pivot = df.pivot(index="Ano", columns="Mês", values="Valor")
 
         # Ordena as colunas pelo mês do ano
         meses_ordenados = [
-            "January", "February", "March", "April", "May", "June",
-            "July", "August", "September", "October", "November", "December"
+            "Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho",
+            "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro"
         ]
         df_pivot = df_pivot.reindex(columns=meses_ordenados)
 
