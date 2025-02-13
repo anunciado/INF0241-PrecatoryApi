@@ -1,21 +1,10 @@
-from fastapi import FastAPI, UploadFile, File, HTTPException, Response
-from fastapi.responses import FileResponse
-import requests
+import joblib
 import pandas as pd
-from sklearn.linear_model import LinearRegression
-import numpy as np
-from io import BytesIO
-
-app = FastAPI()
-
-API_URL = "https://api.bcb.gov.br/dados/serie/bcdata.sgs.4390/dados?formato=json"
-
-
-from fastapi import FastAPI, Response
-from fastapi.responses import FileResponse
 import requests
-import pandas as pd
-import os
+from fastapi import FastAPI
+from fastapi import Response
+from fastapi.responses import FileResponse
+from statsmodels.tsa.arima.model import ARIMA
 
 app = FastAPI()
 
@@ -80,40 +69,41 @@ async def gerar_xls():
     except Exception as e:
         return Response(content=f"Erro ao gerar o arquivo Excel: {e}", status_code=500)
 
-@app.post("/train")
-async def train_model(file: UploadFile = File(...)):
-    # Verifica se o arquivo é Excel
-    if not file.filename.endswith(('.xls', '.xlsx')):
-        raise HTTPException(status_code=400, detail="Arquivo deve ser um Excel.")
+@app.get("/predict_next_month")
+def predict_next_month():
+    # 1. Consumo dos dados da API
+    response = requests.get(API_URL)
+    if response.status_code != 200:
+        return {"error": "Failed to fetch data from API"}
 
-    try:
-        # Lê o arquivo Excel em um DataFrame Pandas
-        contents = await file.read()  # Lê o conteúdo do arquivo
-        excel_data = BytesIO(contents)  # Converte o conteúdo para BytesIO
-        df = pd.read_excel(excel_data)
+    data = response.json()
 
-        # Verifica se o DataFrame tem uma coluna de valores
-        if df.shape[1] < 2:
-            raise HTTPException(status_code=400, detail="O arquivo precisa ter pelo menos duas colunas (índice e valor).")
+    # 2. Conversão dos dados para DataFrame
+    df = pd.DataFrame(data)
+    df["data"] = pd.to_datetime(df["data"], format="%d/%m/%Y")
+    df["valor"] = pd.to_numeric(df["valor"], errors="coerce")
+    df.dropna(inplace=True)
 
-        # Supondo que a última coluna contenha os dados de interesse
-        y = df.iloc[:, -1]
+    # 3. Ordenação por data
+    df.sort_values(by="data", inplace=True)
+    df.set_index("data", inplace=True)
 
-        # Remove valores NaN
-        y = y.dropna().reset_index(drop=True)
+    # 4. Treinamento do modelo ARIMA
+    model = ARIMA(df["valor"], order=(5, 1, 0))  # Ordem (p, d, q) ajustada como exemplo
+    model_fit = model.fit()
 
-        X = np.arange(len(y)).reshape(-1, 1)  # Índice como variável independente
+    # 5. Salvamento do modelo em um arquivo
+    joblib.dump(model_fit, "arima_model.pkl")
 
-        # Treina o modelo de regressão linear
-        model = LinearRegression()
-        model.fit(X, y)
+    # 6. Determinar a data do próximo mês
+    last_date = df.index[-1]
+    next_month_date = last_date + pd.offsets.MonthBegin(1)
 
-        # Faz predições para os próximos 5 pontos
-        future_indices = np.arange(len(y), len(y) + 5).reshape(-1, 1)
-        predictions = model.predict(future_indices)
+    # 7. Fazer a previsão para o próximo mês
+    forecast = model_fit.get_forecast(steps=1)
+    predicted_value = forecast.predicted_mean[0]
 
-        # Retorna as previsões como lista
-        return {"predictions": predictions.tolist()}
-
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Erro ao processar o arquivo: {str(e)}")
+    return {
+        "next_month": next_month_date.strftime("%Y-%m"),
+        "predicted_value": predicted_value
+    }
