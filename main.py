@@ -5,7 +5,7 @@ import joblib
 import pandas as pd
 import requests
 from dotenv import load_dotenv
-from fastapi import FastAPI, Response
+from fastapi import FastAPI, Response, HTTPException
 from fastapi import UploadFile, File, Query
 from fastapi.responses import FileResponse
 from selenium import webdriver
@@ -34,8 +34,8 @@ async def get_tipos_tabela_de_correcao():
 
 
 # Rota para automação
-@app.get("/get_ultima_tabela_de_correcao/{tipo_tabela}")
-def get_ultima_tabela_de_correcao(tipo_tabela: TipoDeTabelaCorrecao):
+@app.get("/get_last_tabela_de_correcao/{tipo_tabela}")
+def get_last_tabela_de_correcao(tipo_tabela: TipoDeTabelaCorrecao):
     match tipo_tabela:
         case 'selic':
             try:
@@ -127,7 +127,8 @@ def get_ultima_tabela_de_correcao(tipo_tabela: TipoDeTabelaCorrecao):
 
                 # Seleciona o mês mais recente no select "Data Final"
                 mes_final_select = wait.until(ec.presence_of_element_located((By.NAME, "mesIndice")))
-                Select(mes_final_select).select_by_index(len(Select(mes_final_select).options) - 1)  # Seleciona o último item
+                Select(mes_final_select).select_by_index(
+                    len(Select(mes_final_select).options) - 1)  # Seleciona o último item
 
                 # Seleciona o ano mais recente no select "Data Final"
                 ano_final_select = wait.until(ec.presence_of_element_located((By.NAME, "anoIndice")))
@@ -180,8 +181,8 @@ def get_ultima_tabela_de_correcao(tipo_tabela: TipoDeTabelaCorrecao):
             return {"message": "Nada a gerar para o tipo de tabela 'selic'."}
 
 
-@app.get("/train_model")
-def train_model():
+@app.get("/create_modelo/{tipo_tabela}")
+def get_create_modelo(tipo_tabela: TipoDeTabelaCorrecao):
     response = requests.get(BCB_API_URL)
     if response.status_code != 200:
         return {"error": "Failed to fetch data from API"}
@@ -205,18 +206,72 @@ def train_model():
     return FileResponse("teste.apk", media_type='application/octet-stream', filename="teste.apk")
 
 
-@app.post("/load_model")
-def load_model(file: UploadFile = File(...)):
-    with open("teste.apk", "wb") as f:
+@app.post("/post_modelo/{tipo_tabela}")
+def post_modelo(tipo_tabela: TipoDeTabelaCorrecao, file: UploadFile = File(...)):
+    apk_model = tipo_tabela.value + ".apk"
+    with open(apk_model, "wb") as f:
         f.write(file.file.read())
 
-    model = joblib.load("teste.apk")
+    match tipo_tabela:
+        case 'selic':
+            model_selic = joblib.load(apk_model)
+        case 'justica_federal':
+            model_justica_federal = joblib.load(apk_model)
+        case _:
+            return {"message": "Nada a gerar para o tipo de tabela 'selic'."}
+
     return {"message": "Model loaded successfully"}
 
 
-@app.get("/predict")
-def predict_value(ano: int = Query(..., description="Ano para a previsão"),
-                  mes: int = Query(..., description="Mês para a previsão")):
+@app.delete("/delete_modelo/{tipo_tabela}")
+def delete_modelo(tipo_tabela: TipoDeTabelaCorrecao):
+    apk_model = tipo_tabela.value + ".apk"
+
+    if os.path.exists(apk_model):
+        try:
+            os.remove(apk_model)
+            return {"message": "Model deleted successfully"}
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"Error deleting model: {str(e)}")
+    else:
+        raise HTTPException(status_code=404, detail="Model file not found")
+
+
+@app.put("/update_modelo/{tipo_tabela}")
+def update_modelo(tipo_tabela: TipoDeTabelaCorrecao, file: UploadFile = File(...)):
+    apk_model = tipo_tabela.value + ".apk"
+
+    if os.path.exists(apk_model):
+        try:
+            with open(apk_model, "wb") as f:
+                f.write(file.file.read())
+            return {"message": "Model updated successfully"}
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"Error updating model: {str(e)}")
+    else:
+        raise HTTPException(status_code=404, detail="Model file not found")
+
+
+@app.get("/get_modelo/{tipo_tabela}")
+def get_modelo(tipo_tabela: TipoDeTabelaCorrecao):
+    apk_model = tipo_tabela.value + ".apk"
+
+    if os.path.exists(apk_model):
+        try:
+            with open(apk_model, "rb") as f:
+                file_content = f.read()
+            return Response(content=file_content, media_type="application/octet-stream",
+                            headers={"Content-Disposition": f"attachment; filename={apk_model}"})
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"Error reading model: {str(e)}")
+    else:
+        raise HTTPException(status_code=404, detail="Model file not found")
+
+
+@app.get("/get_predicao")
+def get_predicao(ano: int = Query(..., description="Ano para a previsão"),
+                 mes: int = Query(..., description="Mês para a previsão"),
+                 tipo_tabela: TipoDeTabelaCorrecao = Query(..., description="Mês para a previsão")):
     if not os.path.exists("teste.apk"):
         return {"error": "Model not found. Train or load the model first."}
 
@@ -231,8 +286,13 @@ def predict_value(ano: int = Query(..., description="Ano para a previsão"),
     }
 
 
-@app.get("/calculate")
-def calculate_value(valor: float, referencia_ano: int, referencia_mes: int, predicao_ano: int, predicao_mes: int):
+@app.get("/get_calculo")
+def get_calculo(valor: float,
+                referencia_ano: int,
+                referencia_mes: int,
+                predicao_ano: int,
+                predicao_mes: int,
+                tipo_tabela: TipoDeTabelaCorrecao):
     if not os.path.exists("teste.apk"):
         return {"error": "Model not found. Train or load the model first."}
 
