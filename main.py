@@ -1,14 +1,124 @@
+import os
+import time
+from selenium.webdriver.support import expected_conditions as EC
+from typing import List
+
 import joblib
 import pandas as pd
 import requests
-from fastapi import FastAPI
-from fastapi import Response
+from fastapi import FastAPI, Response
+from fastapi import UploadFile, File, Query
 from fastapi.responses import FileResponse
-from statsmodels.tsa.arima.model import ARIMA
+from selenium import webdriver
+from selenium.webdriver.chrome.service import Service
+from selenium.webdriver.common.by import By
+from selenium.webdriver.support.ui import Select, WebDriverWait
+from sklearn.model_selection import train_test_split
+from sklearn.tree import DecisionTreeRegressor
+import shutil
+
+from models import TipoDeTabelaCorrecao
 
 app = FastAPI()
 
 API_URL = "https://api.bcb.gov.br/dados/serie/bcdata.sgs.4390/dados?formato=json"
+MODEL_PATH = "decision_tree_model.pkl"
+URL = "https://sicom.cjf.jus.br/tabelaCorMor.php"
+
+
+# Rota para retornar os tipos de tabela de correção
+@app.get("/get_tipos_tabela_de_correcao", status_code=200, response_model=List[str])
+async def get_tipos_tabela_de_correcao():
+    return [tipo.value for tipo in TipoDeTabelaCorrecao]
+
+
+# Rota para automação
+@app.get("/gerar-tabela")
+def gerar_tabela():
+    # Configuração do WebDriver (use o caminho correto para o driver do Chrome)
+    driver_path = "./chromedriver.exe"  # Ajuste o caminho conforme necessário
+    options = webdriver.ChromeOptions()
+    #options.add_argument("--headless")  # Opcional: executa o navegador em modo headless
+    prefs = {"download.default_directory": "/tmp"}  # Define o diretório de download
+    options.add_experimental_option("prefs", prefs)
+    service = Service(driver_path)
+    driver = webdriver.Chrome(service=service, options=options)
+
+    try:
+        # Navega para a página
+        url = "https://sicom.cjf.jus.br/tabelaCorMor.php"
+        driver.get(url)
+
+        # Aguarda o carregamento da página
+        wait = WebDriverWait(driver, 5)  # Espera explícita de até 5 segundos
+
+        # Verificar se existe um iframe e alternar para ele
+        iframes = driver.find_elements(By.TAG_NAME, "iframe")
+        if iframes:
+            driver.switch_to.frame(iframes[0])
+
+        # Seleciona "Tabela de Correção Monetária" no select "Tipo de Tabela"
+        tipo_tabela_select = wait.until(EC.presence_of_element_located((By.NAME, "tipoTabela")))
+        Select(tipo_tabela_select).select_by_value("TCM")
+
+        # Seleciona "Ações Condenatórias em Geral (devedor não enquadrado como Fazenda Pública)" no select "Tipo de Ação"
+        tipo_acao_select = wait.until(EC.presence_of_element_located((By.NAME, "seqEncadeamento")))
+        Select(tipo_acao_select).select_by_value("6")
+
+        time.sleep(1)  # Ajuste o tempo conforme necessário para aguardar o download
+
+        # Seleciona o mês mais recente no select "Data Final"
+        mes_final_select = wait.until(EC.presence_of_element_located((By.NAME, "mesIndice")))
+        Select(mes_final_select).select_by_index(len(Select(mes_final_select).options) - 1)  # Seleciona o último item
+
+        # Seleciona o ano mais recente no select "Data Final"
+        ano_final_select = wait.until(EC.presence_of_element_located((By.NAME, "anoIndice")))
+        Select(ano_final_select).select_by_index(0)  # Seleciona o primeiro item
+
+        # Seleciona "Não" no select "Com Selic?"
+        selic_select = wait.until(EC.presence_of_element_located((By.NAME, "flagSelic")))
+        Select(selic_select).select_by_value("0")
+
+        # Clica no botão "Gerar Tabela"
+        gerar_tabela_button = wait.until(
+            EC.element_to_be_clickable((By.XPATH, "/html/body/div/form/div[2]/input")))
+        gerar_tabela_button.click()
+
+        # Aguarda a mudança de página e o arquivo ser baixado
+        time.sleep(5)  # Ajuste o tempo conforme necessário para o download do arquivo
+
+        # Verifica o arquivo .xls mais recente na pasta de download
+        download_dir = "/tmp"
+        downloaded_file = None
+        latest_time = 0
+
+        for file in os.listdir(download_dir):
+            file_path = os.path.join(download_dir, file)
+            if file.endswith(".xls") and os.path.isfile(file_path):
+                file_mod_time = os.path.getmtime(file_path)
+                if file_mod_time > latest_time:
+                    latest_time = file_mod_time
+                    downloaded_file = file_path
+
+        if downloaded_file:
+            with open(downloaded_file, "rb") as file:
+                file_data = file.read()
+
+            # Retorna o arquivo como resposta
+            return Response(
+                content=file_data,
+                media_type="application/vnd.ms-excel",
+                headers={"Content-Disposition": f"attachment; filename={os.path.basename(downloaded_file)}"}
+            )
+        else:
+            return {"error": "Arquivo não encontrado."}
+
+    except Exception as e:
+        return {"error": str(e)}
+
+    finally:
+        driver.quit()
+
 
 @app.get("/gerar-xls")
 async def gerar_xls():
@@ -69,22 +179,10 @@ async def gerar_xls():
     except Exception as e:
         return Response(content=f"Erro ao gerar o arquivo Excel: {e}", status_code=500)
 
-from fastapi import FastAPI, UploadFile, File, Query
-from fastapi.responses import FileResponse
-import requests
-import pandas as pd
-from sklearn.tree import DecisionTreeRegressor
-from sklearn.model_selection import train_test_split
-import joblib
-import os
-
-# URL da API do Banco Central
-BCB_API_URL = "https://api.bcb.gov.br/dados/serie/bcdata.sgs.4390/dados?formato=json"
-MODEL_PATH = "decision_tree_model.pkl"
 
 @app.get("/train_model")
 def train_model():
-    response = requests.get(BCB_API_URL)
+    response = requests.get(API_URL)
     if response.status_code != 200:
         return {"error": "Failed to fetch data from API"}
 
@@ -106,6 +204,7 @@ def train_model():
     joblib.dump(model, MODEL_PATH)
     return FileResponse(MODEL_PATH, media_type='application/octet-stream', filename=MODEL_PATH)
 
+
 @app.post("/load_model")
 def load_model(file: UploadFile = File(...)):
     with open(MODEL_PATH, "wb") as f:
@@ -114,8 +213,10 @@ def load_model(file: UploadFile = File(...)):
     model = joblib.load(MODEL_PATH)
     return {"message": "Model loaded successfully"}
 
+
 @app.get("/predict")
-def predict_value(ano: int = Query(..., description="Ano para a previsão"), mes: int = Query(..., description="Mês para a previsão")):
+def predict_value(ano: int = Query(..., description="Ano para a previsão"),
+                  mes: int = Query(..., description="Mês para a previsão")):
     if not os.path.exists(MODEL_PATH):
         return {"error": "Model not found. Train or load the model first."}
 
@@ -129,12 +230,13 @@ def predict_value(ano: int = Query(..., description="Ano para a previsão"), mes
         "predicted_value": predicted_value
     }
 
+
 @app.get("/calculate")
 def calculate_value(valor: float, referencia_ano: int, referencia_mes: int, predicao_ano: int, predicao_mes: int):
     if not os.path.exists(MODEL_PATH):
         return {"error": "Model not found. Train or load the model first."}
 
-    response = requests.get(BCB_API_URL)
+    response = requests.get(API_URL)
     if response.status_code != 200:
         return {"error": "Failed to fetch data from API"}
 

@@ -1,11 +1,9 @@
 from enum import Enum
 from pydantic import BaseModel
 
-
 class TipoDeTabelaCorrecao(str, Enum):
     selic = "selic"
-    encoge = "encoge"
-    justicaFederal = "justicaFederal"
+    justica_federal = "justica_federal"
 
 class Numero(BaseModel):
     """
