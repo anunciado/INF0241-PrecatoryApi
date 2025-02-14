@@ -69,41 +69,118 @@ async def gerar_xls():
     except Exception as e:
         return Response(content=f"Erro ao gerar o arquivo Excel: {e}", status_code=500)
 
-@app.get("/predict_next_month")
-def predict_next_month():
-    # 1. Consumo dos dados da API
-    response = requests.get(API_URL)
+from fastapi import FastAPI, UploadFile, File, Query
+from fastapi.responses import FileResponse
+import requests
+import pandas as pd
+from sklearn.tree import DecisionTreeRegressor
+from sklearn.model_selection import train_test_split
+import joblib
+import os
+
+# URL da API do Banco Central
+BCB_API_URL = "https://api.bcb.gov.br/dados/serie/bcdata.sgs.4390/dados?formato=json"
+MODEL_PATH = "decision_tree_model.pkl"
+
+@app.get("/train_model")
+def train_model():
+    response = requests.get(BCB_API_URL)
     if response.status_code != 200:
         return {"error": "Failed to fetch data from API"}
 
     data = response.json()
-
-    # 2. Conversão dos dados para DataFrame
     df = pd.DataFrame(data)
     df["data"] = pd.to_datetime(df["data"], format="%d/%m/%Y")
     df["valor"] = pd.to_numeric(df["valor"], errors="coerce")
     df.dropna(inplace=True)
 
-    # 3. Ordenação por data
-    df.sort_values(by="data", inplace=True)
-    df.set_index("data", inplace=True)
+    df["mes"] = df["data"].dt.month
+    df["ano"] = df["data"].dt.year
+    X = df[["ano", "mes"]]
+    y = df["valor"]
 
-    # 4. Treinamento do modelo ARIMA
-    model = ARIMA(df["valor"], order=(5, 1, 0))  # Ordem (p, d, q) ajustada como exemplo
-    model_fit = model.fit()
+    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+    model = DecisionTreeRegressor()
+    model.fit(X_train, y_train)
 
-    # 5. Salvamento do modelo em um arquivo
-    joblib.dump(model_fit, "arima_model.pkl")
+    joblib.dump(model, MODEL_PATH)
+    return FileResponse(MODEL_PATH, media_type='application/octet-stream', filename=MODEL_PATH)
 
-    # 6. Determinar a data do próximo mês
-    last_date = df.index[-1]
-    next_month_date = last_date + pd.offsets.MonthBegin(1)
+@app.post("/load_model")
+def load_model(file: UploadFile = File(...)):
+    with open(MODEL_PATH, "wb") as f:
+        f.write(file.file.read())
 
-    # 7. Fazer a previsão para o próximo mês
-    forecast = model_fit.get_forecast(steps=1)
-    predicted_value = forecast.predicted_mean[0]
+    model = joblib.load(MODEL_PATH)
+    return {"message": "Model loaded successfully"}
+
+@app.get("/predict")
+def predict_value(ano: int = Query(..., description="Ano para a previsão"), mes: int = Query(..., description="Mês para a previsão")):
+    if not os.path.exists(MODEL_PATH):
+        return {"error": "Model not found. Train or load the model first."}
+
+    model = joblib.load(MODEL_PATH)
+    input_data = pd.DataFrame([[ano, mes]], columns=["ano", "mes"])
+    predicted_value = model.predict(input_data)[0]
 
     return {
-        "next_month": next_month_date.strftime("%Y-%m"),
+        "ano": ano,
+        "mes": mes,
         "predicted_value": predicted_value
+    }
+
+@app.get("/calculate")
+def calculate_value(valor: float, referencia_ano: int, referencia_mes: int, predicao_ano: int, predicao_mes: int):
+    if not os.path.exists(MODEL_PATH):
+        return {"error": "Model not found. Train or load the model first."}
+
+    response = requests.get(BCB_API_URL)
+    if response.status_code != 200:
+        return {"error": "Failed to fetch data from API"}
+
+    data = response.json()
+    df = pd.DataFrame(data)
+    df["data"] = pd.to_datetime(df["data"], format="%d/%m/%Y")
+    df["valor"] = pd.to_numeric(df["valor"], errors="coerce")
+    df.dropna(inplace=True)
+    df["mes"] = df["data"].dt.month
+    df["ano"] = df["data"].dt.year
+
+    # Carregar o modelo treinado
+    model = joblib.load(MODEL_PATH)
+
+    # Determinar a última data no conjunto de dados
+    last_date = df["data"].max()
+
+    # Criar uma lista de meses e anos para predição até a data de predicao_ano e predicao_mes
+    pred_dates = pd.date_range(start=last_date + pd.offsets.MonthBegin(1),
+                               end=pd.Timestamp(year=predicao_ano, month=predicao_mes, day=1),
+                               freq="MS")
+
+    # Prever os valores para os meses ausentes
+    predictions = []
+    for date in pred_dates:
+        input_data = pd.DataFrame([[date.year, date.month]], columns=["ano", "mes"])
+        predicted_value = model.predict(input_data)[0]
+        predictions.append((date, predicted_value))
+
+    # Atualizar o DataFrame com os valores previstos
+    for date, value in predictions:
+        df = pd.concat([df, pd.DataFrame({"data": [date], "valor": [value], "ano": [date.year], "mes": [date.month]})])
+
+    # Ordenar o DataFrame por data
+    df.sort_values(by="data", inplace=True)
+
+    # Calcular os valores cumulativos para previsão até a data de referência
+    reference_date = pd.Timestamp(year=referencia_ano, month=referencia_mes, day=1)
+    cumulative_value = df.loc[df["data"] >= reference_date, "valor"].cumsum().iloc[-1]
+
+    # Retornar o valor multiplicado pelo valor de referência
+    reference_value = df.loc[(df["ano"] == referencia_ano) & (df["mes"] == referencia_mes), "valor"].values[0]
+    result = valor * reference_value
+
+    return {
+        "reference_date": reference_date.strftime("%Y-%m"),
+        "cumulative_value": cumulative_value,
+        "result": result
     }
