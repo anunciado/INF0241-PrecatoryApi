@@ -182,28 +182,60 @@ def get_last_tabela_de_correcao(tipo_tabela: TipoDeTabelaCorrecao):
 
 
 @app.get("/create_modelo/{tipo_tabela}")
-def get_create_modelo(tipo_tabela: TipoDeTabelaCorrecao):
-    response = requests.get(BCB_API_URL)
-    if response.status_code != 200:
-        return {"error": "Failed to fetch data from API"}
+def create_modelo(tipo_tabela: TipoDeTabelaCorrecao):
+    apk_model = tipo_tabela.value + ".apk"
 
-    data = response.json()
-    df = pd.DataFrame(data)
-    df["data"] = pd.to_datetime(df["data"], format="%d/%m/%Y")
-    df["valor"] = pd.to_numeric(df["valor"], errors="coerce")
-    df.dropna(inplace=True)
+    match tipo_tabela:
+        case 'selic':
+            response = requests.get(BCB_API_URL)
+            if response.status_code != 200:
+                return {"error": "Failed to fetch data from API"}
 
-    df["mes"] = df["data"].dt.month
-    df["ano"] = df["data"].dt.year
-    X = df[["ano", "mes"]]
-    y = df["valor"]
+            data = response.json()
+            df = pd.DataFrame(data)
+            df["data"] = pd.to_datetime(df["data"], format="%d/%m/%Y")
+            df["valor"] = pd.to_numeric(df["valor"], errors="coerce")
+            df.dropna(inplace=True)
 
-    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
-    model = DecisionTreeRegressor()
-    model.fit(X_train, y_train)
+            df["mes"] = df["data"].dt.month
+            df["ano"] = df["data"].dt.year
+            X = df[["ano", "mes"]]
+            y = df["valor"]
 
-    joblib.dump(model, "teste.apk")
-    return FileResponse("teste.apk", media_type='application/octet-stream', filename="teste.apk")
+            X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+            model = DecisionTreeRegressor()
+            model.fit(X_train, y_train)
+
+            joblib.dump(model, apk_model)
+            return FileResponse(apk_model, media_type='application/octet-stream', filename=apk_model)
+        case 'justica_federal':
+            try:
+                # Ler o arquivo fornecido
+                df = pd.read_excel(r"C:/Users/cruxi/git/INF0241-PrecatoryApi/14QK7n3JsbcFhaoLB8l3Rb.xls", engine="openpyxl")
+
+                # Supondo que o arquivo tem colunas "ano", "mes" e "valor"
+                df.dropna(subset=["ano", "mes", "valor"], inplace=True)
+
+                # Criar coluna de data combinando ano e mês (assumindo dia 1 para simplificação)
+                df["data"] = pd.to_datetime(df[["ano", "mes"]].assign(dia=1))
+
+                # Definir as variáveis de entrada e saída
+                X = df[["ano", "mes"]]
+                y = df["valor"]
+
+                # Treinar o modelo
+                X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+                model = DecisionTreeRegressor()
+                model.fit(X_train, y_train)
+
+                # Salvar o modelo
+                joblib.dump(model, apk_model)
+                return FileResponse(apk_model, media_type='application/octet-stream', filename=apk_model)
+
+            except Exception as e:
+                return {"error": f"Failed to process data: {str(e)}"}
+        case _:
+            return {"message": "Nada a gerar para o tipo de tabela 'selic'."}
 
 
 @app.post("/post_modelo/{tipo_tabela}")
@@ -272,10 +304,12 @@ def get_modelo(tipo_tabela: TipoDeTabelaCorrecao):
 def get_predicao(ano: int = Query(..., description="Ano para a previsão"),
                  mes: int = Query(..., description="Mês para a previsão"),
                  tipo_tabela: TipoDeTabelaCorrecao = Query(..., description="Mês para a previsão")):
-    if not os.path.exists("teste.apk"):
+    apk_model = tipo_tabela.value + ".apk"
+
+    if not os.path.exists(apk_model):
         return {"error": "Model not found. Train or load the model first."}
 
-    model = joblib.load("teste.apk")
+    model = joblib.load(apk_model)
     input_data = pd.DataFrame([[ano, mes]], columns=["ano", "mes"])
     predicted_value = model.predict(input_data)[0]
 
@@ -293,7 +327,9 @@ def get_calculo(valor: float,
                 predicao_ano: int,
                 predicao_mes: int,
                 tipo_tabela: TipoDeTabelaCorrecao):
-    if not os.path.exists("teste.apk"):
+    apk_model = tipo_tabela.value + ".apk"
+
+    if not os.path.exists(apk_model):
         return {"error": "Model not found. Train or load the model first."}
 
     response = requests.get(BCB_API_URL)
@@ -309,7 +345,7 @@ def get_calculo(valor: float,
     df["ano"] = df["data"].dt.year
 
     # Carregar o modelo treinado
-    model = joblib.load("teste.apk")
+    model = joblib.load(apk_model)
 
     # Determinar a última data no conjunto de dados
     last_date = df["data"].max()
@@ -330,16 +366,23 @@ def get_calculo(valor: float,
     for date, value in predictions:
         df = pd.concat([df, pd.DataFrame({"data": [date], "valor": [value], "ano": [date.year], "mes": [date.month]})])
 
-    # Ordenar o DataFrame por data
-    df.sort_values(by="data", inplace=True)
+    # Ordena os dados da mais recente para a mais antiga
+    df = df.sort_values(by="data", ascending=False).reset_index(drop=True)
+
+    # Substitui o primeiro valor por 1
+    if not df.empty:
+        df.at[0, "valor"] = 1
+
+    # Itera sobre os demais dados e ajusta os valores para o valor acumulado
+    for i in range(1, len(df)):
+        df.at[i, "valor"] = df.at[i - 1, "valor"] + df.at[i, "valor"] * 0.01
 
     # Calcular os valores cumulativos para previsão até a data de referência
     reference_date = pd.Timestamp(year=referencia_ano, month=referencia_mes, day=1)
-    cumulative_value = df.loc[df["data"] >= reference_date, "valor"].cumsum().iloc[-1]
+    cumulative_value = df.loc[df["data"] == reference_date].iloc[0]['valor']
 
     # Retornar o valor multiplicado pelo valor de referência
-    reference_value = df.loc[(df["ano"] == referencia_ano) & (df["mes"] == referencia_mes), "valor"].values[0]
-    result = valor * reference_value
+    result = valor * cumulative_value
 
     return {
         "reference_date": reference_date.strftime("%Y-%m"),
