@@ -1,53 +1,51 @@
 import os
 import time
-from selenium.webdriver.support import expected_conditions as EC
 from typing import List
 
 import joblib
 import pandas as pd
 import requests
+from dotenv import load_dotenv
 from fastapi import FastAPI, Response
 from fastapi import UploadFile, File, Query
 from fastapi.responses import FileResponse
 from selenium import webdriver
 from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.common.by import By
+from selenium.webdriver.support import expected_conditions as ec
 from selenium.webdriver.support.ui import Select, WebDriverWait
 from sklearn.model_selection import train_test_split
 from sklearn.tree import DecisionTreeRegressor
-import shutil
 
 from models import TipoDeTabelaCorrecao
 
+load_dotenv()
 app = FastAPI()
 
-API_URL = "https://api.bcb.gov.br/dados/serie/bcdata.sgs.4390/dados?formato=json"
-MODEL_PATH = "decision_tree_model.pkl"
-URL = "https://sicom.cjf.jus.br/tabelaCorMor.php"
-
+BCB_API_URL = os.getenv('BCB_API_URL')
+CJF_URL = os.getenv('CJF_URL')
+DRIVER_PATH = os.getenv('DRIVER_PATH')
+DOWNLOAD_PATH = os.getcwd()
 
 # Rota para retornar os tipos de tabela de correção
 @app.get("/get_tipos_tabela_de_correcao", status_code=200, response_model=List[str])
 async def get_tipos_tabela_de_correcao():
     return [tipo.value for tipo in TipoDeTabelaCorrecao]
 
-
 # Rota para automação
 @app.get("/gerar-tabela")
 def gerar_tabela():
     # Configuração do WebDriver (use o caminho correto para o driver do Chrome)
-    driver_path = "./chromedriver.exe"  # Ajuste o caminho conforme necessário
     options = webdriver.ChromeOptions()
-    #options.add_argument("--headless")  # Opcional: executa o navegador em modo headless
-    prefs = {"download.default_directory": "/tmp"}  # Define o diretório de download
+    options.add_argument("--headless")  # Opcional: executa o navegador em modo headless
+    prefs = {"download.default_directory": DOWNLOAD_PATH}
     options.add_experimental_option("prefs", prefs)
-    service = Service(driver_path)
+    service = Service(DRIVER_PATH)
     driver = webdriver.Chrome(service=service, options=options)
 
     try:
         # Navega para a página
-        url = "https://sicom.cjf.jus.br/tabelaCorMor.php"
-        driver.get(url)
+        driver.get(CJF_URL)
 
         # Aguarda o carregamento da página
         wait = WebDriverWait(driver, 5)  # Espera explícita de até 5 segundos
@@ -58,42 +56,41 @@ def gerar_tabela():
             driver.switch_to.frame(iframes[0])
 
         # Seleciona "Tabela de Correção Monetária" no select "Tipo de Tabela"
-        tipo_tabela_select = wait.until(EC.presence_of_element_located((By.NAME, "tipoTabela")))
+        tipo_tabela_select = wait.until(ec.presence_of_element_located((By.NAME, "tipoTabela")))
         Select(tipo_tabela_select).select_by_value("TCM")
 
         # Seleciona "Ações Condenatórias em Geral (devedor não enquadrado como Fazenda Pública)" no select "Tipo de Ação"
-        tipo_acao_select = wait.until(EC.presence_of_element_located((By.NAME, "seqEncadeamento")))
+        tipo_acao_select = wait.until(ec.presence_of_element_located((By.NAME, "seqEncadeamento")))
         Select(tipo_acao_select).select_by_value("6")
 
         time.sleep(1)  # Ajuste o tempo conforme necessário para aguardar o download
 
         # Seleciona o mês mais recente no select "Data Final"
-        mes_final_select = wait.until(EC.presence_of_element_located((By.NAME, "mesIndice")))
+        mes_final_select = wait.until(ec.presence_of_element_located((By.NAME, "mesIndice")))
         Select(mes_final_select).select_by_index(len(Select(mes_final_select).options) - 1)  # Seleciona o último item
 
         # Seleciona o ano mais recente no select "Data Final"
-        ano_final_select = wait.until(EC.presence_of_element_located((By.NAME, "anoIndice")))
+        ano_final_select = wait.until(ec.presence_of_element_located((By.NAME, "anoIndice")))
         Select(ano_final_select).select_by_index(0)  # Seleciona o primeiro item
 
         # Seleciona "Não" no select "Com Selic?"
-        selic_select = wait.until(EC.presence_of_element_located((By.NAME, "flagSelic")))
+        selic_select = wait.until(ec.presence_of_element_located((By.NAME, "flagSelic")))
         Select(selic_select).select_by_value("0")
 
         # Clica no botão "Gerar Tabela"
         gerar_tabela_button = wait.until(
-            EC.element_to_be_clickable((By.XPATH, "/html/body/div/form/div[2]/input")))
+            ec.element_to_be_clickable((By.XPATH, "/html/body/div/form/div[2]/input")))
         gerar_tabela_button.click()
 
         # Aguarda a mudança de página e o arquivo ser baixado
         time.sleep(5)  # Ajuste o tempo conforme necessário para o download do arquivo
 
         # Verifica o arquivo .xls mais recente na pasta de download
-        download_dir = "/tmp"
         downloaded_file = None
         latest_time = 0
 
-        for file in os.listdir(download_dir):
-            file_path = os.path.join(download_dir, file)
+        for file in os.listdir(DOWNLOAD_PATH):
+            file_path = os.path.join(DOWNLOAD_PATH, file)
             if file.endswith(".xls") and os.path.isfile(file_path):
                 file_mod_time = os.path.getmtime(file_path)
                 if file_mod_time > latest_time:
@@ -124,7 +121,7 @@ def gerar_tabela():
 async def gerar_xls():
     try:
         # Consome os dados da API do Banco Central
-        response = requests.get(API_URL)
+        response = requests.get(BCB_API_URL)
         response.raise_for_status()
         dados = response.json()
 
@@ -182,7 +179,7 @@ async def gerar_xls():
 
 @app.get("/train_model")
 def train_model():
-    response = requests.get(API_URL)
+    response = requests.get(BCB_API_URL)
     if response.status_code != 200:
         return {"error": "Failed to fetch data from API"}
 
@@ -201,26 +198,26 @@ def train_model():
     model = DecisionTreeRegressor()
     model.fit(X_train, y_train)
 
-    joblib.dump(model, MODEL_PATH)
-    return FileResponse(MODEL_PATH, media_type='application/octet-stream', filename=MODEL_PATH)
+    joblib.dump(model, "teste.apk")
+    return FileResponse("teste.apk", media_type='application/octet-stream', filename="teste.apk")
 
 
 @app.post("/load_model")
 def load_model(file: UploadFile = File(...)):
-    with open(MODEL_PATH, "wb") as f:
+    with open("teste.apk", "wb") as f:
         f.write(file.file.read())
 
-    model = joblib.load(MODEL_PATH)
+    model = joblib.load("teste.apk")
     return {"message": "Model loaded successfully"}
 
 
 @app.get("/predict")
 def predict_value(ano: int = Query(..., description="Ano para a previsão"),
                   mes: int = Query(..., description="Mês para a previsão")):
-    if not os.path.exists(MODEL_PATH):
+    if not os.path.exists("teste.apk"):
         return {"error": "Model not found. Train or load the model first."}
 
-    model = joblib.load(MODEL_PATH)
+    model = joblib.load("teste.apk")
     input_data = pd.DataFrame([[ano, mes]], columns=["ano", "mes"])
     predicted_value = model.predict(input_data)[0]
 
@@ -233,10 +230,10 @@ def predict_value(ano: int = Query(..., description="Ano para a previsão"),
 
 @app.get("/calculate")
 def calculate_value(valor: float, referencia_ano: int, referencia_mes: int, predicao_ano: int, predicao_mes: int):
-    if not os.path.exists(MODEL_PATH):
+    if not os.path.exists("teste.apk"):
         return {"error": "Model not found. Train or load the model first."}
 
-    response = requests.get(API_URL)
+    response = requests.get(BCB_API_URL)
     if response.status_code != 200:
         return {"error": "Failed to fetch data from API"}
 
@@ -249,7 +246,7 @@ def calculate_value(valor: float, referencia_ano: int, referencia_mes: int, pred
     df["ano"] = df["data"].dt.year
 
     # Carregar o modelo treinado
-    model = joblib.load(MODEL_PATH)
+    model = joblib.load("teste.apk")
 
     # Determinar a última data no conjunto de dados
     last_date = df["data"].max()
