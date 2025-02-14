@@ -1,6 +1,5 @@
 import os
 import time
-from typing import List
 
 import joblib
 import pandas as pd
@@ -27,154 +26,158 @@ CJF_URL = os.getenv('CJF_URL')
 DRIVER_PATH = os.getenv('DRIVER_PATH')
 DOWNLOAD_PATH = os.getcwd()
 
+
 # Rota para retornar os tipos de tabela de correção
-@app.get("/get_tipos_tabela_de_correcao", status_code=200, response_model=List[str])
+@app.get("/get_tipos_tabela_de_correcao")
 async def get_tipos_tabela_de_correcao():
     return [tipo.value for tipo in TipoDeTabelaCorrecao]
 
+
 # Rota para automação
-@app.get("/gerar-tabela")
-def gerar_tabela():
-    # Configuração do WebDriver (use o caminho correto para o driver do Chrome)
-    options = webdriver.ChromeOptions()
-    options.add_argument("--headless")  # Opcional: executa o navegador em modo headless
-    prefs = {"download.default_directory": DOWNLOAD_PATH}
-    options.add_experimental_option("prefs", prefs)
-    service = Service(DRIVER_PATH)
-    driver = webdriver.Chrome(service=service, options=options)
+@app.get("/get_ultima_tabela_de_correcao/{tipo_tabela}")
+def get_ultima_tabela_de_correcao(tipo_tabela: TipoDeTabelaCorrecao):
+    match tipo_tabela:
+        case 'selic':
+            try:
+                # Consome os dados da API do Banco Central
+                response = requests.get(BCB_API_URL)
+                response.raise_for_status()
+                dados = response.json()
 
-    try:
-        # Navega para a página
-        driver.get(CJF_URL)
+                # Transforma os dados em um DataFrame do pandas
+                df = pd.DataFrame(dados)
 
-        # Aguarda o carregamento da página
-        wait = WebDriverWait(driver, 5)  # Espera explícita de até 5 segundos
+                # Ajusta as colunas para o formato esperado
+                df.columns = ["Data", "Valor"]
 
-        # Verificar se existe um iframe e alternar para ele
-        iframes = driver.find_elements(By.TAG_NAME, "iframe")
-        if iframes:
-            driver.switch_to.frame(iframes[0])
+                # Converte a coluna "Data" para o formato datetime
+                df["Data"] = pd.to_datetime(df["Data"], format="%d/%m/%Y")
 
-        # Seleciona "Tabela de Correção Monetária" no select "Tipo de Tabela"
-        tipo_tabela_select = wait.until(ec.presence_of_element_located((By.NAME, "tipoTabela")))
-        Select(tipo_tabela_select).select_by_value("TCM")
+                # Converte a coluna "Valor" para float
+                df["Valor"] = pd.to_numeric(df["Valor"], errors="coerce")
 
-        # Seleciona "Ações Condenatórias em Geral (devedor não enquadrado como Fazenda Pública)" no select "Tipo de Ação"
-        tipo_acao_select = wait.until(ec.presence_of_element_located((By.NAME, "seqEncadeamento")))
-        Select(tipo_acao_select).select_by_value("6")
+                # Ordena os dados da mais recente para a mais antiga
+                df = df.sort_values(by="Data", ascending=False).reset_index(drop=True)
 
-        time.sleep(1)  # Ajuste o tempo conforme necessário para aguardar o download
+                # Substitui o primeiro valor por 1
+                if not df.empty:
+                    df.at[0, "Valor"] = 1
 
-        # Seleciona o mês mais recente no select "Data Final"
-        mes_final_select = wait.until(ec.presence_of_element_located((By.NAME, "mesIndice")))
-        Select(mes_final_select).select_by_index(len(Select(mes_final_select).options) - 1)  # Seleciona o último item
+                # Itera sobre os demais dados e ajusta os valores para o valor acumulado
+                for i in range(1, len(df)):
+                    df.at[i, "Valor"] = df.at[i - 1, "Valor"] + df.at[i, "Valor"] * 0.01
 
-        # Seleciona o ano mais recente no select "Data Final"
-        ano_final_select = wait.until(ec.presence_of_element_located((By.NAME, "anoIndice")))
-        Select(ano_final_select).select_by_index(0)  # Seleciona o primeiro item
+                # Extrai o ano e o mês das datas
+                df["Ano"] = df["Data"].dt.year
+                df["Mês"] = df["Data"].dt.month_name(locale='pt_BR')
 
-        # Seleciona "Não" no select "Com Selic?"
-        selic_select = wait.until(ec.presence_of_element_located((By.NAME, "flagSelic")))
-        Select(selic_select).select_by_value("0")
+                # Cria uma tabela dinâmica com os anos como linhas e os meses como colunas
+                df_pivot = df.pivot(index="Ano", columns="Mês", values="Valor")
 
-        # Clica no botão "Gerar Tabela"
-        gerar_tabela_button = wait.until(
-            ec.element_to_be_clickable((By.XPATH, "/html/body/div/form/div[2]/input")))
-        gerar_tabela_button.click()
+                # Ordena as colunas pelo mês do ano
+                meses_ordenados = [
+                    "Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho",
+                    "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro"
+                ]
+                df_pivot = df_pivot.reindex(columns=meses_ordenados)
 
-        # Aguarda a mudança de página e o arquivo ser baixado
-        time.sleep(5)  # Ajuste o tempo conforme necessário para o download do arquivo
+                # Define o caminho do arquivo Excel gerado
+                caminho_arquivo = "dados_bcb.xlsx"
 
-        # Verifica o arquivo .xls mais recente na pasta de download
-        downloaded_file = None
-        latest_time = 0
+                # Gera o arquivo Excel
+                df_pivot.to_excel(caminho_arquivo)
 
-        for file in os.listdir(DOWNLOAD_PATH):
-            file_path = os.path.join(DOWNLOAD_PATH, file)
-            if file.endswith(".xls") and os.path.isfile(file_path):
-                file_mod_time = os.path.getmtime(file_path)
-                if file_mod_time > latest_time:
-                    latest_time = file_mod_time
-                    downloaded_file = file_path
+                # Retorna o arquivo gerado como resposta
+                return FileResponse(caminho_arquivo, media_type="application/vnd.ms-excel", filename=caminho_arquivo)
 
-        if downloaded_file:
-            with open(downloaded_file, "rb") as file:
-                file_data = file.read()
+            except requests.RequestException as e:
+                return Response(content=f"Erro ao acessar a API: {e}", status_code=500)
+            except Exception as e:
+                return Response(content=f"Erro ao gerar o arquivo Excel: {e}", status_code=500)
+        case 'justica_federal':
+            # Configuração do WebDriver (use o caminho correto para o driver do Chrome)
+            options = webdriver.ChromeOptions()
+            options.add_argument("--headless")  # Opcional: executa o navegador em modo headless
+            prefs = {"download.default_directory": DOWNLOAD_PATH}
+            options.add_experimental_option("prefs", prefs)
+            service = Service(DRIVER_PATH)
+            driver = webdriver.Chrome(service=service, options=options)
 
-            # Retorna o arquivo como resposta
-            return Response(
-                content=file_data,
-                media_type="application/vnd.ms-excel",
-                headers={"Content-Disposition": f"attachment; filename={os.path.basename(downloaded_file)}"}
-            )
-        else:
-            return {"error": "Arquivo não encontrado."}
+            try:
+                # Navega para a página
+                driver.get(CJF_URL)
 
-    except Exception as e:
-        return {"error": str(e)}
+                # Aguarda o carregamento da página
+                wait = WebDriverWait(driver, 5)  # Espera explícita de até 5 segundos
 
-    finally:
-        driver.quit()
+                # Verificar se existe um iframe e alternar para ele
+                iframes = driver.find_elements(By.TAG_NAME, "iframe")
+                if iframes:
+                    driver.switch_to.frame(iframes[0])
 
+                # Seleciona "Tabela de Correção Monetária" no select "Tipo de Tabela"
+                tipo_tabela_select = wait.until(ec.presence_of_element_located((By.NAME, "tipoTabela")))
+                Select(tipo_tabela_select).select_by_value("TCM")
 
-@app.get("/gerar-xls")
-async def gerar_xls():
-    try:
-        # Consome os dados da API do Banco Central
-        response = requests.get(BCB_API_URL)
-        response.raise_for_status()
-        dados = response.json()
+                # Seleciona "Ações Condenatórias em Geral (devedor não enquadrado como Fazenda Pública)" no select "Tipo de Ação"
+                tipo_acao_select = wait.until(ec.presence_of_element_located((By.NAME, "seqEncadeamento")))
+                Select(tipo_acao_select).select_by_value("6")
 
-        # Transforma os dados em um DataFrame do pandas
-        df = pd.DataFrame(dados)
+                time.sleep(1)  # Ajuste o tempo conforme necessário para aguardar o download
 
-        # Ajusta as colunas para o formato esperado
-        df.columns = ["Data", "Valor"]
+                # Seleciona o mês mais recente no select "Data Final"
+                mes_final_select = wait.until(ec.presence_of_element_located((By.NAME, "mesIndice")))
+                Select(mes_final_select).select_by_index(len(Select(mes_final_select).options) - 1)  # Seleciona o último item
 
-        # Converte a coluna "Data" para o formato datetime
-        df["Data"] = pd.to_datetime(df["Data"], format="%d/%m/%Y")
+                # Seleciona o ano mais recente no select "Data Final"
+                ano_final_select = wait.until(ec.presence_of_element_located((By.NAME, "anoIndice")))
+                Select(ano_final_select).select_by_index(0)  # Seleciona o primeiro item
 
-        # Converte a coluna "Valor" para float
-        df["Valor"] = pd.to_numeric(df["Valor"], errors="coerce")
+                # Seleciona "Não" no select "Com Selic?"
+                selic_select = wait.until(ec.presence_of_element_located((By.NAME, "flagSelic")))
+                Select(selic_select).select_by_value("0")
 
-        # Ordena os dados da mais recente para a mais antiga
-        df = df.sort_values(by="Data", ascending=False).reset_index(drop=True)
+                # Clica no botão "Gerar Tabela"
+                gerar_tabela_button = wait.until(
+                    ec.element_to_be_clickable((By.XPATH, "/html/body/div/form/div[2]/input")))
+                gerar_tabela_button.click()
 
-        # Substitui o primeiro valor por 1
-        if not df.empty:
-            df.at[0, "Valor"] = 1
+                # Aguarda a mudança de página e o arquivo ser baixado
+                time.sleep(5)  # Ajuste o tempo conforme necessário para o download do arquivo
 
-        # Itera sobre os demais dados e ajusta os valores para o valor acumulado
-        for i in range(1, len(df)):
-            df.at[i, "Valor"] = df.at[i - 1, "Valor"] + df.at[i, "Valor"] * 0.01
+                # Verifica o arquivo .xls mais recente na pasta de download
+                downloaded_file = None
+                latest_time = 0
 
-        # Extrai o ano e o mês das datas
-        df["Ano"] = df["Data"].dt.year
-        df["Mês"] = df["Data"].dt.month_name(locale='pt_BR')
+                for file in os.listdir(DOWNLOAD_PATH):
+                    file_path = os.path.join(DOWNLOAD_PATH, file)
+                    if file.endswith(".xls") and os.path.isfile(file_path):
+                        file_mod_time = os.path.getmtime(file_path)
+                        if file_mod_time > latest_time:
+                            latest_time = file_mod_time
+                            downloaded_file = file_path
 
-        # Cria uma tabela dinâmica com os anos como linhas e os meses como colunas
-        df_pivot = df.pivot(index="Ano", columns="Mês", values="Valor")
+                if downloaded_file:
+                    with open(downloaded_file, "rb") as file:
+                        file_data = file.read()
 
-        # Ordena as colunas pelo mês do ano
-        meses_ordenados = [
-            "Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho",
-            "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro"
-        ]
-        df_pivot = df_pivot.reindex(columns=meses_ordenados)
+                    # Retorna o arquivo como resposta
+                    return Response(
+                        content=file_data,
+                        media_type="application/vnd.ms-excel",
+                        headers={"Content-Disposition": f"attachment; filename={os.path.basename(downloaded_file)}"}
+                    )
+                else:
+                    return {"error": "Arquivo não encontrado."}
 
-        # Define o caminho do arquivo Excel gerado
-        caminho_arquivo = "dados_bcb.xlsx"
+            except Exception as e:
+                return {"error": str(e)}
 
-        # Gera o arquivo Excel
-        df_pivot.to_excel(caminho_arquivo)
+            finally:
+                driver.quit()
 
-        # Retorna o arquivo gerado como resposta
-        return FileResponse(caminho_arquivo, media_type="application/vnd.ms-excel", filename=caminho_arquivo)
-
-    except requests.RequestException as e:
-        return Response(content=f"Erro ao acessar a API: {e}", status_code=500)
-    except Exception as e:
-        return Response(content=f"Erro ao gerar o arquivo Excel: {e}", status_code=500)
+        case _:
+            return {"message": "Nada a gerar para o tipo de tabela 'selic'."}
 
 
 @app.get("/train_model")
