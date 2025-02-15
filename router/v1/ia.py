@@ -153,8 +153,8 @@ def post_predicao(predicaoInput: PredicaoInput) -> PredicaoOutput:
     ano_atual = data_atual.year
     mes_atual = data_atual.month
 
-    if ((predicaoInput.predicao_ano > ano_atual) or
-            (predicaoInput.predicao_ano == ano_atual and predicaoInput.predicao_mes > mes_atual)):
+    if ((predicaoInput.ano < ano_atual) or
+            (predicaoInput.ano == ano_atual and predicaoInput.mes <= mes_atual)):
         raise HTTPException(status_code=400, detail="Não é permitido calcular um valor no passado.")
 
     apk_model = predicaoInput.tipo_tabela.value + ".apk"
@@ -184,13 +184,17 @@ def post_calculo(calculoInput: CalculoInput) -> CalculoOutput:
                 f"referencia_mes={calculoInput.referencia_mes}, predicao_ano={calculoInput.predicao_ano}, "
                 f"predicao_mes={calculoInput.predicao_mes}, tipo_tabela={calculoInput.tipo_tabela},"
                 f"valor={calculoInput.valor}")
+    if calculoInput.valor <= 0:
+        logger.error("Erro ao calcular: Não é permitido calcular um valor negativo ou igual a zero.")
+        raise HTTPException(status_code=400, detail="Não é permitido calcular um valor negativoou igual a zero.")
+
     # Define a data mínima como agosto de 1986
     ano_minimo = 1986
     mes_minimo = 8
 
     # Verifica se a data fornecida não é menor que agosto de 1986
-    if ((calculoInput.referencia_ano > ano_minimo) or
-            (calculoInput.referencia_ano == ano_minimo and calculoInput.referencia_mes  >= mes_minimo)):
+    if ((calculoInput.referencia_ano < ano_minimo) or
+            (calculoInput.referencia_ano == ano_minimo and calculoInput.referencia_mes < mes_minimo)):
         logger.error("Erro ao calcular: Não é permitido calcular um valor que anteceda agosto de 1986.")
         raise HTTPException(status_code=400, detail="Não é permitido calcular um valor que anteceda agosto de 1986.")
 
@@ -199,14 +203,10 @@ def post_calculo(calculoInput: CalculoInput) -> CalculoOutput:
     ano_atual = data_atual.year
     mes_atual = data_atual.month
 
-    if ((calculoInput.predicao_ano > ano_atual) or
-            (calculoInput.predicao_ano == ano_atual and calculoInput.predicao_mes > mes_atual)):
+    if ((calculoInput.predicao_ano < ano_atual) or
+            (calculoInput.predicao_ano == ano_atual and calculoInput.predicao_mes <= mes_atual)):
         logger.error("Erro ao calcular: Não é permitido fazer uma predição com data no passado.")
         raise HTTPException(status_code=400, detail="Não é permitido fazer uma predição com data no passado.")
-
-    if calculoInput.valor < 0:
-        logger.error("Erro ao calcular: Não é permitido calcular um valor negativo.")
-        raise HTTPException(status_code=400, detail="Não é permitido calcular um valor negativo.")
 
     apk_model = calculoInput.tipo_tabela.value + ".apk"
 
