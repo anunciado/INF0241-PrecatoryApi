@@ -16,7 +16,7 @@ Uma API de precatórios judiciais usando REST para a classe UFG INF INF0241: Con
  - Sklearn, uma ferramenta para aprendizado de máquina construído sobre a biblioteca SciPy;
  - Swagger, uma especificação aberta para definição de APIs REST.
 
-# Configuração do ambiente de desenvolvimento
+## Configuração do ambiente de desenvolvimento
 
 ### Windows
 
