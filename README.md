@@ -18,10 +18,10 @@ Uma API de precatórios judiciais usando REST para a classe UFG INF INF0241: Con
 
 ## Configuração do ambiente de desenvolvimento
 
-1. Instale o python, na versão 3.10, através do (link)[https://www.python.org/downloads/];
-2. Instale o navegador do chrome através do (link)[https://www.google.com/chrome/];
+1. Instale o python, na versão 3.10, através do [link](https://www.python.org/downloads/);
+2. Instale o navegador do chrome através do [link](https://www.google.com/chrome/);
 3. Clone este repositório https://github.com/anunciado/INF0241-PrecatoryAp.git em sua máquina local;
-4. Baixe o driver, respeitando a versão do chrome instalada em sua máquina, através do (link)[https://googlechromelabs.github.io/chrome-for-testing/] e coloque o arquivo na raiz do projeto;
+4. Baixe o driver, respeitando a versão do chrome instalada em sua máquina, através do [link](https://googlechromelabs.github.io/chrome-for-testing/) e coloque o arquivo na raiz do projeto;
 6. Abra o projeto em sua IDE de preferência, como sugestão utilize o Visual Studio Code ou PyCharm;
 7. Crie um ambiente virtual com o comando:
 ```
