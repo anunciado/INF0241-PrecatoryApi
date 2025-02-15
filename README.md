@@ -18,9 +18,39 @@ Uma API de precatórios judiciais usando REST para a classe UFG INF INF0241: Con
 
 ## Configuração do ambiente de desenvolvimento
 
-### Windows
-
-### Linux
+1. Instale o python, na versão 3.10, através do (link)[https://www.python.org/downloads/];
+2. Instale o navegador do chrome através do (link)[https://www.google.com/chrome/];
+3. Clone este repositório https://github.com/anunciado/INF0241-PrecatoryAp.git em sua máquina local;
+4. Baixe o driver, respeitando a versão do chrome instalada em sua máquina, através do (link)[https://googlechromelabs.github.io/chrome-for-testing/] e coloque o arquivo na raiz do projeto;
+6. Abra o projeto em sua IDE de preferência, como sugestão utilize o Visual Studio Code ou PyCharm;
+7. Crie um ambiente virtual com o comando:
+```
+. python -m venv venv
+```
+7. Ative o ambiente virtual com o comando:
+* No windows:
+```
+venv\Scripts\activate
+```
+* No linux:
+```
+source venv/bin/activate
+```
+8. Instale as bibliotecas no seu ambiente virtual a partir do arquivo _requirements.txt_ com o comando:
+```
+pip install -r requirements.txt
+```
+8. Crie um arquivo _.env_ na raiz do projeto como no exemplo arquivo _.env.sample_ com os seguintes parâmetros, alterando o DRIVER_PATH, colocando o path pro driver e API_TOKEN, uma senha pessoa para acesso as rotas.
+```
+BCB_API_URL=https://api.bcb.gov.br/dados/serie/bcdata.sgs.4390/dados?formato=json
+CJF_URL=https://sicom.cjf.jus.br/tabelaCorMor.php
+DRIVER_PATH=./chromedriver.exe
+API_TOKEN=suausenha
+```
+9. Execute o projeto com o comando:
+```
+fastapi dev main.py
+```
 
 ## Swagger 
 
