@@ -2,7 +2,7 @@ import os
 
 import requests
 from dotenv import load_dotenv
-from fastapi import Response, HTTPException, APIRouter
+from fastapi import HTTPException, APIRouter
 from fastapi import UploadFile, File
 from fastapi.responses import FileResponse
 
