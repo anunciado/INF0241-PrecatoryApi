@@ -1,36 +1,6 @@
-from enum import Enum
 from pydantic import BaseModel
 
-class TipoDeTabelaCorrecao(str, Enum):
-    selic = "selic"
-    justica_federal = "justica_federal"
-
-class PredicaoInput(BaseModel):
-    """
-    Classe que representa os parâmetros de entrada para predição do valor de um tipo de tabela.
-
-    Atributos:
-        ano (int): Ano previsto.
-        mes (int): Mês previsto.
-        tipo_tabela (TipoDeTabelaCorrecao): Tipo de tabela.
-    """
-    ano: int
-    mes: int
-    tipo_tabela: TipoDeTabelaCorrecao
-
-
-class PredicaoOutput(BaseModel):
-    """
-    Classe que representa uma predição do valor de um tipo de tabela.
-
-    Atributos:
-        ano (int): Ano previsto.
-        mes (int): Mês previsto.
-        valor_previsto (float): Valor previsto.
-    """
-    ano: int
-    mes: int
-    valor_previsto: float
+from models.tipoDeTabelaCorrecao import TipoDeTabelaCorrecao
 
 class CalculoInput(BaseModel):
     """
@@ -65,14 +35,3 @@ class CalculoOutput(BaseModel):
     mes: int
     taxa: float
     valor_previsto: float
-
-
-class Resposta(BaseModel):
-    """
-    Classe que representa uma resposta de sucesso para funções.
-
-    Atributos:
-        mensagem (str): A mensagem da resposta.
-    """
-
-    mensagem: str
