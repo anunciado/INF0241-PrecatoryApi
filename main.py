@@ -4,24 +4,18 @@ from config.security import commom_verificacao_api_token
 from router.api import router
 
 description = """
-        ChimichangApp API helps you do awesome stuff. 🚀
+PrecatoryAPI foi desenvolvida para auxiliar no cálculo e automação de processos relacionados a precatórios. 🧮
         
-        ## Tipo De Tabela Correcao
+## Funcionalidades
         
-        You can **read items**.
-        
-        ## Modelo
-        
-        You will be able to:
-        
-        * **Create users** (_not implemented_).
-        * **Read users** (_not implemented_).
+* Integração com sistema de inteligência artificial para predição de valores após correção monetária.
+* Automação de geração de relatórios para cálculos de correção monetária.
+* Rotas protegidas por token de API.
 """
 
 app = FastAPI(
     title="PrecatoryAPI",
     description=description,
-    summary="API desenvolvida para auxiliar nos cálculos de precatórios",
     version="0.1",
     contact={
         "name": "Luís Eduardo Anunciado Silva",

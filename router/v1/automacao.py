@@ -15,22 +15,31 @@ router = APIRouter(
     tags=["taxa"]
 )
 
-
-# Rota para retornar os tipos de tabela de correção
-@router.get("/get_tipos_tabela_de_correcao")
+@router.get(
+    "/get_tipos_tabela_de_correcao",
+    summary="Obter tipos de tabela de correção",
+    description="Retorna os tipos de tabela de correção disponíveis.",
+    response_model=list[str],
+    status_code=200
+)
 async def get_tipos_tabela_de_correcao():
     logger.info(f"Requisição de buscar os tipos de tabela de correção recebida.")
     return [tipo.value for tipo in TipoDeTabelaCorrecao]
 
-
-# Rota para automação
-@router.get("/get_last_tabela_de_correcao/{tipo_tabela}")
+@router.get(
+    "/get_last_tabela_de_correcao/{tipo_tabela}",
+    summary="Obter última tabela de correção",
+    description="Retorna a última tabela de correção com base no tipo especificado (SELIC ou Justiça Federal).",
+    status_code=200
+)
 def get_last_tabela_de_correcao(tipo_tabela: TipoDeTabelaCorrecao):
     logger.info(f"Requisição de buscar última tabela de correção recebida com parâmetro tipo_tabela={tipo_tabela}.")
 
     match tipo_tabela:
+        # Caso o tipo seja 'selic'
         case 'selic':
             try:
+                # Chama o serviço para obter a tabela de correção SELIC
                 nome_arquivo = TaxaService.get_tabela_de_correcao_selic()
 
                 # Retorna o arquivo gerado como resposta
@@ -41,10 +50,14 @@ def get_last_tabela_de_correcao(tipo_tabela: TipoDeTabelaCorrecao):
                 raise HTTPException(status_code=500, detail="Erro ao acessar a API externa do BCB.")
             except Exception as e:
                 raise HTTPException(status_code=500, detail="Erro ao gerar o arquivo Excel.")
+
+        # Caso o tipo seja 'justica_federal'
         case 'justica_federal':
+            # Inicializa o navegador para automação
             driver = TaxaService.get_driver()
 
             try:
+                # Chama o serviço que faz o download da tabela do site da Justiça Federal
                 downloaded_file = TaxaService.get_tabela_de_correcao_justica_federal(driver)
 
                 if downloaded_file:
@@ -61,11 +74,13 @@ def get_last_tabela_de_correcao(tipo_tabela: TipoDeTabelaCorrecao):
                         headers={"Content-Disposition": f"attachment; filename={nome_arquivo}"}
                     )
                 else:
-                    raise HTTPException(status_code=500, detail="Erro ao baixar o arquivo da página externa do CJF.")
+                    raise HTTPException(status_code=500,
+                                        detail="Erro ao baixar o arquivo da página externa do CJF.")
 
             except Exception as e:
                 raise HTTPException(status_code=500, detail="Erro ao acessar a página externa da CJF.")
 
             finally:
+                # Fecha o navegador após o processo
                 driver.quit()
                 logger.info("Navegador fechado.")

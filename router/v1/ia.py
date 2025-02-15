@@ -24,8 +24,12 @@ router = APIRouter(
     tags=["taxa"]
 )
 
-
-@router.get("/create_modelo/{tipo_tabela}")
+@router.get(
+    "/create_modelo/{tipo_tabela}",
+    summary="Criar Modelo",
+    description="Cria e retorna um arquivo de modelo com base no tipo de tabela fornecido.",
+    status_code=200
+)
 def create_modelo(tipo_tabela: TipoDeTabelaCorrecao):
     logger.info(f"Requisição de criar modelo recebida com parâmetro tipo_tabela={tipo_tabela}")
 
@@ -45,8 +49,14 @@ def create_modelo(tipo_tabela: TipoDeTabelaCorrecao):
                                 detail="Criação de modelo da justiça federal ainda não foi implementada.")
 
 
-@router.post("/post_modelo/{tipo_tabela}")
-def post_modelo(tipo_tabela: TipoDeTabelaCorrecao, file: UploadFile = File(...)):
+@router.post(
+    "/post_modelo/{tipo_tabela}",
+    summary="Carregar Modelo",
+    description="Carrega um arquivo de modelo para o tipo de tabela fornecido.",
+    response_model=Resposta,
+    status_code=200
+)
+def post_modelo(tipo_tabela: TipoDeTabelaCorrecao, file: UploadFile = File(...)) -> Resposta:
     logger.info(f"Requisição de salvar o modelo recebida com parâmetro tipo_tabela={tipo_tabela}")
     apk_model = tipo_tabela.value + ".apk"
 
@@ -59,8 +69,14 @@ def post_modelo(tipo_tabela: TipoDeTabelaCorrecao, file: UploadFile = File(...))
         raise HTTPException(status_code=500, detail="Erro ao carregar o arquivo do modelo.")
 
 
-@router.delete("/delete_modelo/{tipo_tabela}")
-def delete_modelo(tipo_tabela: TipoDeTabelaCorrecao):
+@router.delete(
+    "/delete_modelo/{tipo_tabela}",
+    summary="Excluir Modelo",
+    description="Exclui o modelo correspondente ao tipo de tabela fornecido.",
+    response_model=Resposta,
+    status_code=200
+)
+def delete_modelo(tipo_tabela: TipoDeTabelaCorrecao) -> Resposta:
     logger.info(f"Requisição de remover o modelo recebida com parâmetro tipo_tabela={tipo_tabela}")
     apk_model = tipo_tabela.value + ".apk"
 
@@ -75,8 +91,14 @@ def delete_modelo(tipo_tabela: TipoDeTabelaCorrecao):
         raise HTTPException(status_code=404, detail="Arquivo do modelo não encontrado.")
 
 
-@router.put("/update_modelo/{tipo_tabela}")
-def update_modelo(tipo_tabela: TipoDeTabelaCorrecao, file: UploadFile = File(...)):
+@router.put(
+    "/update_modelo/{tipo_tabela}",
+    summary="Atualizar Modelo",
+    description="Atualiza um modelo existente com um novo arquivo para o tipo de tabela especificado.",
+    response_model=Resposta,
+    status_code=200
+)
+def update_modelo(tipo_tabela: TipoDeTabelaCorrecao, file: UploadFile = File(...)) -> Resposta:
     logger.info(f"Requisição de atualizar o modelo recebida com parâmetro tipo_tabela={tipo_tabela}")
     apk_model = tipo_tabela.value + ".apk"
 
@@ -92,7 +114,12 @@ def update_modelo(tipo_tabela: TipoDeTabelaCorrecao, file: UploadFile = File(...
         raise HTTPException(status_code=404, detail="Arquivo do modelo não encontrado.")
 
 
-@router.get("/get_modelo/{tipo_tabela}")
+@router.get(
+    "/get_modelo/{tipo_tabela}",
+    summary="Obter Modelo",
+    description="Obtém o arquivo de modelo correspondente ao tipo de tabela especificado.",
+    status_code=200
+)
 def get_modelo(tipo_tabela: TipoDeTabelaCorrecao):
     logger.info(f"Requisição de buscar o modelo recebida com parâmetro tipo_tabela={tipo_tabela}")
     apk_model = tipo_tabela.value + ".apk"
@@ -102,16 +129,21 @@ def get_modelo(tipo_tabela: TipoDeTabelaCorrecao):
             with open(apk_model, "rb") as f:
                 file_content = f.read()
             logger.info(f"Requisição processada com sucesso. Será retornado o arquivo: {apk_model}")
-            return Response(content=file_content, media_type="application/octet-stream",
-                            headers={"Content-Disposition": f"attachment; filename={apk_model}"})
+            return FileResponse(apk_model, media_type='application/octet-stream', filename=apk_model)
         except Exception as e:
             raise HTTPException(status_code=500, detail="Erro ao buscar o arquivo do modelo.")
     else:
         raise HTTPException(status_code=404, detail="Arquivo do modelo não encontrado.")
 
 
-@router.get("/get_predicao")
-def get_predicao(predicaoInput: PredicaoInput):
+@router.get(
+    "/get_predicao",
+    summary="Obter Predição",
+    description="Gera uma predição com base nos parâmetros de ano, mês e tipo de tabela fornecidos.",
+    response_model=PredicaoOutput,
+    status_code=200
+)
+def get_predicao(predicaoInput: PredicaoInput) -> PredicaoOutput:
     logger.info(f"Requisição de predição recebida com parâmetros ano={predicaoInput.ano}, mes={predicaoInput.mes}, "
                 f"tipo_tabela={predicaoInput.tipo_tabela}")
 
@@ -129,8 +161,14 @@ def get_predicao(predicaoInput: PredicaoInput):
             raise HTTPException(status_code=501, detail="Predição com o modelo ainda não foi implementada.")
 
 
-@router.get("/get_calculo")
-def get_calculo(calculoInput: CalculoInput):
+@router.get(
+    "/get_calculo",
+    summary="Obter Cálculo",
+    description="Realiza um cálculo com base nos parâmetros de referência e predição fornecidos.",
+    response_model=CalculoOutput,
+    status_code=200
+)
+def get_calculo(calculoInput: CalculoInput) -> CalculoOutput:
     logger.info(f"Requisição de cálculo recebida com parâmetros referencia_ano={calculoInput.referencia_ano}, "
                 f"referencia_mes={calculoInput.referencia_mes}, predicao_ano={calculoInput.predicao_ano}, "
                 f"predicao_mes={calculoInput.predicao_mes}, tipo_tabela={calculoInput.tipo_tabela}")
