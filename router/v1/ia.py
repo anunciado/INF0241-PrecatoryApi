@@ -40,7 +40,7 @@ def create_modelo(tipo_tabela: TipoDeTabelaCorrecao):
             if response.status_code != 200:
                 raise HTTPException(status_code=500, detail="Erro ao acessar a API externa do BCB.")
 
-            TaxaService.create_modelo_selic(response.json(), apk_model)
+            TaxaService.create_modelo_selic(response, apk_model)
 
             logger.info(f"Requisição processada com sucesso. Será retornado o arquivo: {apk_model}")
             return FileResponse(apk_model, media_type='application/octet-stream', filename=apk_model)
@@ -136,14 +136,14 @@ def get_modelo(tipo_tabela: TipoDeTabelaCorrecao):
         raise HTTPException(status_code=404, detail="Arquivo do modelo não encontrado.")
 
 
-@router.get(
-    "/get_predicao",
+@router.post(
+    "/post_predicao",
     summary="Obter Predição",
     description="Gera uma predição com base nos parâmetros de ano, mês e tipo de tabela fornecidos.",
     response_model=PredicaoOutput,
     status_code=200
 )
-def get_predicao(predicaoInput: PredicaoInput) -> PredicaoOutput:
+def post_predicao(predicaoInput: PredicaoInput) -> PredicaoOutput:
     logger.info(f"Requisição de predição recebida com parâmetros ano={predicaoInput.ano}, mes={predicaoInput.mes}, "
                 f"tipo_tabela={predicaoInput.tipo_tabela}")
 
@@ -161,14 +161,14 @@ def get_predicao(predicaoInput: PredicaoInput) -> PredicaoOutput:
             raise HTTPException(status_code=501, detail="Predição com o modelo ainda não foi implementada.")
 
 
-@router.get(
-    "/get_calculo",
+@router.post(
+    "/post_calculo",
     summary="Obter Cálculo",
     description="Realiza um cálculo com base nos parâmetros de referência e predição fornecidos.",
     response_model=CalculoOutput,
     status_code=200
 )
-def get_calculo(calculoInput: CalculoInput) -> CalculoOutput:
+def post_calculo(calculoInput: CalculoInput) -> CalculoOutput:
     logger.info(f"Requisição de cálculo recebida com parâmetros referencia_ano={calculoInput.referencia_ano}, "
                 f"referencia_mes={calculoInput.referencia_mes}, predicao_ano={calculoInput.predicao_ano}, "
                 f"predicao_mes={calculoInput.predicao_mes}, tipo_tabela={calculoInput.tipo_tabela}")
@@ -182,7 +182,7 @@ def get_calculo(calculoInput: CalculoInput) -> CalculoOutput:
             response = requests.get(BCB_API_URL)
             if response.status_code != 200:
                 raise HTTPException(status_code=500, detail="Erro ao acessar a API externa do BCB.")
-            taxa, valor_previsto = TaxaService.get_calculo_selic(calculoInput, response)
+            taxa, valor_previsto = TaxaService.get_calculo_selic(apk_model, calculoInput, response)
 
             logger.info(f"Requisição processada com sucesso.")
             return CalculoOutput(ano=calculoInput.referencia_ano, mes=calculoInput.referencia_mes,
