@@ -160,6 +160,7 @@ def post_predicao(predicaoInput: PredicaoInput) -> PredicaoOutput:
     apk_model = predicaoInput.tipo_tabela.value + ".apk"
 
     if not os.path.exists(apk_model):
+        logger.error("Erro ao calcular: Modelo não encontrado. Treine ou carregue o modelo primeiro.")
         raise HTTPException(status_code=500, detail="Modelo não encontrado. Treine ou carregue o modelo primeiro.")
 
     match predicaoInput.tipo_tabela:
@@ -190,6 +191,7 @@ def post_calculo(calculoInput: CalculoInput) -> CalculoOutput:
     # Verifica se a data fornecida não é menor que agosto de 1986
     if ((calculoInput.referencia_ano > ano_minimo) or
             (calculoInput.referencia_ano == ano_minimo and calculoInput.referencia_mes  >= mes_minimo)):
+        logger.error("Erro ao calcular: Não é permitido calcular um valor que anteceda agosto de 1986.")
         raise HTTPException(status_code=400, detail="Não é permitido calcular um valor que anteceda agosto de 1986.")
 
     # Obtém o ano e mês atuais
@@ -199,9 +201,11 @@ def post_calculo(calculoInput: CalculoInput) -> CalculoOutput:
 
     if ((calculoInput.predicao_ano > ano_atual) or
             (calculoInput.predicao_ano == ano_atual and calculoInput.predicao_mes > mes_atual)):
+        logger.error("Erro ao calcular: Não é permitido fazer uma predição com data no passado.")
         raise HTTPException(status_code=400, detail="Não é permitido fazer uma predição com data no passado.")
 
     if calculoInput.valor < 0:
+        logger.error("Erro ao calcular: Não é permitido calcular um valor negativo.")
         raise HTTPException(status_code=400, detail="Não é permitido calcular um valor negativo.")
 
     apk_model = calculoInput.tipo_tabela.value + ".apk"
@@ -213,6 +217,7 @@ def post_calculo(calculoInput: CalculoInput) -> CalculoOutput:
         case 'selic':
             response = requests.get(BCB_API_URL)
             if response.status_code != 200:
+                logger.error("Erro ao calcular: Erro ao acessar a API externa do BCB.")
                 raise HTTPException(status_code=500, detail="Erro ao acessar a API externa do BCB.")
             taxa, valor_previsto = TaxaService.get_calculo_selic(apk_model, calculoInput, response)
 

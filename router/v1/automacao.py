@@ -47,8 +47,10 @@ def get_last_tabela_de_correcao(tipo_tabela: TipoDeTabelaCorrecao):
                 return FileResponse(nome_arquivo, media_type="application/vnd.ms-excel", filename=nome_arquivo)
 
             except requests.RequestException as e:
+                logger.error(f"Erro ao acessar a API externa do BCB: {e}")
                 raise HTTPException(status_code=500, detail="Erro ao acessar a API externa do BCB.")
             except Exception as e:
+                logger.error(f"Erro ao gerar o arquivo Excel: {e}")
                 raise HTTPException(status_code=500, detail="Erro ao gerar o arquivo Excel.")
 
         # Caso o tipo seja 'justica_federal'
@@ -74,10 +76,12 @@ def get_last_tabela_de_correcao(tipo_tabela: TipoDeTabelaCorrecao):
                         headers={"Content-Disposition": f"attachment; filename={nome_arquivo}"}
                     )
                 else:
+                    logger.error("Erro ao baixar o arquivo da página externa do CJF.")
                     raise HTTPException(status_code=500,
                                         detail="Erro ao baixar o arquivo da página externa do CJF.")
 
             except Exception as e:
+                logger.error(f"Erro ao acessar a página externa da CJF: {e}")
                 raise HTTPException(status_code=500, detail="Erro ao acessar a página externa da CJF.")
 
             finally:
